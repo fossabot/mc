@@ -1,6 +1,6 @@
 const EventEmitter = require('events');
 var app = require('express')();
-
+var express = require('express');
 var server = require('http').Server(app);
 
 var io = require('socket.io')(server);
@@ -51,6 +51,7 @@ app.use(function (req, res, next) {
 });
 app.use(bodyParser.json());
 
+app.use(express.static('./public'));
 
 app.post('/create', function (req, res) {
     req.body.jobId = '_' + req.body.jobId
