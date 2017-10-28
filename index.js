@@ -164,4 +164,4 @@ io.on('connection', function (socket) {
 
 });
 
-server.listen(7001,()=>{console.log("server started")})
+server.listen(80,()=>{console.log("server started")})
