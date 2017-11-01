@@ -1,10 +1,37 @@
 const Xray = require('x-ray');
-const rp = require('request-promise');
+const request = require('requestretry');
+const retry = require('async-retry');
 const sizeof = require('sizeof');
 const Bottleneck = require("bottleneck");
 const {
     URL
 } = require('url');
+
+
+
+function getRPage(opt) {
+    return new Promise((resolve, reject) => {
+        request({
+            url: opt.url,
+            method: opt.method,
+            formData: opt.formData,
+            json: true,
+            timeout:10000,
+            // The below parameters are specific to request-retry
+            maxAttempts: 3, // (default) try 5 times
+            retryDelay: 5000, // (default) wait for 5s before trying again
+            retryStrategy: request.RetryStrategies.HTTPOrNetworkError // (default) retry on 5xx or network errors
+        }, function (err, response, body) {
+            // this callback will only be called when the request succeeded or after maxAttempts or on error
+            if (err) {
+                reject("Network Error - Triggered in getRPage")
+            }
+            if (response) {
+                resolve(body);
+            }
+        });
+    })
+}
 
 
 async function cleanFinData(obj) {
@@ -54,13 +81,12 @@ async function recurseFinPage(next_page, row_pos, url_path, x) {
                     sc_did: next_page.sc_did,
                     start_year: next_page.start_year,
                     type: next_page.type
-                },
-                timeout: 25000
+                }
             }
             //send POST request to server (which responds with html document if successful)
-            rp_opt.formData.nav = 'next'
+            rp_opt.formData.nav = 'next';
+            html = await getRPage(rp_opt)
 
-            html = await rp(rp_opt)
             //collect data from table on the page
             resp = await x(html, {
                 page: {
@@ -84,7 +110,6 @@ async function recurseFinPage(next_page, row_pos, url_path, x) {
                 }
             })
 
-
             //push result of the page to array
             obj.push(resp.page);
             next_page = resp.next_page;
@@ -92,14 +117,21 @@ async function recurseFinPage(next_page, row_pos, url_path, x) {
                 next_page.action = url_path;
             }
         }
+        return obj;
     } catch (e) {
-        return 'Error from recurse ' + e;
+        console.log("error in recurse " + e)
+        throw e;
+        return 0;
     }
 
-    return obj;
 }
 
-async function crawlFinPg(link, row_pos, x) {
+
+
+
+
+
+async function RcrawlFinPg(link, row_pos, x) {
     var firstResponse, standaloneStore = [],
         consolidatedStore = [],
         mainStore = {
@@ -108,105 +140,127 @@ async function crawlFinPg(link, row_pos, x) {
         };
     var action_link_path = new URL(link);
 
-    //load first standalone and consolidated page and collect data
-    firstResponse = await x(link, {
-        standalone: {
-            page: {
-                year: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) tr:nth-child(' + row_pos + ') td:not(:first-child)'],
-                rows: {
-                    detHeader: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[colspan="1"].det'],
-                    detData: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td:not([colspan="1"]).det'],
-                    hedHeader: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[colspan="1"].hed'],
-                    hedData: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[align="right"].hed'],
-                }
-            },
-            next_page: {
-                action: '#finyear_frm@action',
-                val: '',
-                type: '#finyear_frm #type@value',
-                sc_did: '#finyear_frm #sc_did@value',
-                start_year: '#finyear_frm #start_year@value',
-                end_year: '#finyear_frm #end_year@value',
-                max_year: '#finyear_frm #max_year@value',
-                button: '#finyear_frm a@onclick'
-            },
+    try {
+        //load first standalone and consolidated page and collect data
+        firstResponse = {}
+        await x(link, {
+            standalone: {
+                page: {
+                    year: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) tr:nth-child(' + row_pos + ') td:not(:first-child)'],
+                    rows: {
+                        detHeader: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[colspan="1"].det'],
+                        detData: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td:not([colspan="1"]).det'],
+                        hedHeader: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[colspan="1"].hed'],
+                        hedData: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[align="right"].hed'],
+                    }
+                },
+                next_page: {
+                    action: '#finyear_frm@action',
+                    val: '',
+                    type: '#finyear_frm #type@value',
+                    sc_did: '#finyear_frm #sc_did@value',
+                    start_year: '#finyear_frm #start_year@value',
+                    end_year: '#finyear_frm #end_year@value',
+                    max_year: '#finyear_frm #max_year@value',
+                    button: '#finyear_frm a@onclick'
+                },
 
-        },
-        consolidated: x('#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > div > ul > li:nth-child(2) > a@href', {
-            page: {
-                year: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) tr:nth-child(' + row_pos + ') td:not(:first-child)'],
-                rows: {
-                    detHeader: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[colspan="1"].det'],
-                    detData: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td:not([colspan="1"]).det'],
-                    hedHeader: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[colspan="1"].hed'],
-                    hedData: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[align="right"].hed'],
-                }
             },
-            next_page: {
-                action: '#finyear_frm@action',
-                val: '',
-                type: '#finyear_frm #type@value',
-                sc_did: '#finyear_frm #sc_did@value',
-                start_year: '#finyear_frm #start_year@value',
-                end_year: '#finyear_frm #end_year@value',
-                max_year: '#finyear_frm #max_year@value',
-                button: '#finyear_frm a@onclick'
-            }
-
+            consolidated: x('#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > div > ul > li:nth-child(2) > a@href', {
+                page: {
+                    year: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) tr:nth-child(' + row_pos + ') td:not(:first-child)'],
+                    rows: {
+                        detHeader: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[colspan="1"].det'],
+                        detData: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td:not([colspan="1"]).det'],
+                        hedHeader: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[colspan="1"].hed'],
+                        hedData: ['#mc_mainWrapper > div.PA10 > div.content.FL.PA5 > div.pcContainer > div.FL.rightCont > div:nth-child(2) > div.boxBg > div.boxBg1 > table:nth-child(3) td[align="right"].hed'],
+                    }
+                },
+                next_page: {
+                    action: '#finyear_frm@action',
+                    val: '',
+                    type: '#finyear_frm #type@value',
+                    sc_did: '#finyear_frm #sc_did@value',
+                    start_year: '#finyear_frm #start_year@value',
+                    end_year: '#finyear_frm #end_year@value',
+                    max_year: '#finyear_frm #max_year@value',
+                    button: '#finyear_frm a@onclick'
+                }
+            })
+        }).then((r) => {
+            
+            firstResponse = r
+        }).catch((e) => {
+            throw e
         })
 
-    })
+        //check if standalone.next_page.action is empty 
+        if (firstResponse.standalone.next_page.action == null) {
+            firstResponse.standalone.next_page.action = action_link_path.pathname;
+        }
 
+        //check if additonal standalone page is available and collate data
+        if (Object.keys(firstResponse.standalone.next_page).length && firstResponse.standalone.next_page.button != undefined) {
+            standaloneStore = await recurseFinPage(firstResponse.standalone.next_page, row_pos, action_link_path.pathname, x);
+            mainStore.standalone.push(firstResponse.standalone.page);
+            standaloneStore.forEach((e) => {
+                mainStore.standalone.push(e)
+            });
+        } else {
+            mainStore.standalone.push(firstResponse.standalone.page);
+        }
+        //check if additonal consolidated page is available and collate data
+        if (Object.keys(firstResponse.consolidated.next_page).length && firstResponse.consolidated.next_page.button != undefined) {
+            mainStore.consolidated.push(firstResponse.consolidated.page)
+            consolidatedStore = await recurseFinPage(firstResponse.consolidated.next_page, row_pos, '', x);
+            consolidatedStore.forEach((e) => {
+                mainStore.consolidated.push(e)
+            })
+        } else {
+            mainStore.consolidated.push(firstResponse.consolidated.page)
 
+        }
 
-    //check if standalone.next_page.action is empty 
-    if (firstResponse.standalone.next_page.action == null) {
-        firstResponse.standalone.next_page.action = action_link_path.pathname;
+        //clean the collated data
+        for (let i = 0; i < mainStore.standalone.length; i++) {
+            let r = await cleanFinData(mainStore.standalone[i]);
+            mainStore.standalone[i] = r;
+        }
+        for (let i = 0; i < mainStore.consolidated.length; i++) {
+            let r = await cleanFinData(mainStore.consolidated[i]);
+            mainStore.consolidated[i] = r;
+        }
+        return mainStore;
+    } catch (e) {
+        throw e + ' from CrawlFinPage';
+        return 0;
     }
 
-    //check if additonal standalone page is available and collate data
-    if (Object.keys(firstResponse.standalone.next_page).length && firstResponse.standalone.next_page.button != undefined) {
-        standaloneStore = await recurseFinPage(firstResponse.standalone.next_page, row_pos, action_link_path.pathname, x);
-        mainStore.standalone.push(firstResponse.standalone.page);
-        standaloneStore.forEach((e) => {
-            mainStore.standalone.push(e)
-        });
-    } else {
-        mainStore.standalone.push(firstResponse.standalone.page);
-    }
-    //check if additonal consolidated page is available and collate data
-    if (Object.keys(firstResponse.consolidated.next_page).length && firstResponse.consolidated.next_page.button != undefined) {
-        mainStore.consolidated.push(firstResponse.consolidated.page)
-        consolidatedStore = await recurseFinPage(firstResponse.consolidated.next_page, row_pos, '', x);
-        consolidatedStore.forEach((e) => {
-            mainStore.consolidated.push(e)
-        })
-    } else {
-        mainStore.consolidated.push(firstResponse.consolidated.page)
-
-    }
-
-    //clean the collated data
-    for (let i = 0; i < mainStore.standalone.length; i++) {
-        let r = await cleanFinData(mainStore.standalone[i]);
-        mainStore.standalone[i] = r;
-    }
-    for (let i = 0; i < mainStore.consolidated.length; i++) {
-        let r = await cleanFinData(mainStore.consolidated[i]);
-        mainStore.consolidated[i] = r;
-    }
-
-    return mainStore;
 }
 
 
-async function getCompanyData(companyUrl, jobId, db, ih, Emitter, p) {
-    var x = Xray();
+async function crawlFinPg(link, row_pos, x){
+    
+    //return RcrawlFinPg(link, row_pos, x)
+
+ let a= await retry(async ()=>await RcrawlFinPg(link, row_pos, x), {
+        retries: retryInstruction.retryLimit,
+        minTimeout:retryInstruction.retryTimeout,
+        maxTimeout:retryInstruction.retryTimeout,
+        factor:1,
+        onRetry:(ee)=>{console.log('retrydue to '  + ee)}
+      }).catch(e=>{throw e})
+
+    return a;
+    
+}
+
+
+async function RgetCompanyData(companyUrl, jobId, db, ih, Emitter, p) {
     var pageLinks, basicQuotePrice, balanceSheet, profitLoss, quarterlyResults, cashFlow;
     try {
 
-
-        basicQuotePrice = await x(companyUrl, {
+        await x(companyUrl, {
             companyName: '#nChrtPrc > div.b_42.PT5.PR > h1',
             price: {
                 bse: '#b_prevclose > strong',
@@ -223,17 +277,25 @@ async function getCompanyData(companyUrl, jobId, db, ih, Emitter, p) {
                 }
             },
             finSectionUrl: '#slider > dt:nth-child(9) > a@href'
+        }).then((r) => {
+            basicQuotePrice = r;
+        }).catch((e) => {
+            throw e
         })
 
 
+
         if (basicQuotePrice.finSectionUrl != null) {
-            pageLinks = await x(basicQuotePrice.finSectionUrl, {
+            await x(basicQuotePrice.finSectionUrl, {
                 balanceSheet: '#slider > dd:nth-child(10) > ul > li.act > a@href',
                 profitLoss: '#slider > dd:nth-child(10) > ul > li:nth-child(2) > a@href',
                 quarterlyResults: '#slider > dd:nth-child(10) > ul > li:nth-child(3) > a@href',
                 cashFlow: '#slider > dd:nth-child(10) > ul > li:nth-child(7) > a@href'
+            }).then((r) => {
+                pageLinks = r;
+            }).catch((e) => {
+                throw e
             });
-
 
             balanceSheet = await crawlFinPg(pageLinks.balanceSheet, 1, x);
             //console.log(balanceSheet)
@@ -270,7 +332,7 @@ async function getCompanyData(companyUrl, jobId, db, ih, Emitter, p) {
             await extractUniqueFields(db, profitLoss, jobId, 'profitloss');
             await extractUniqueFields(db, quarterlyResults, jobId, 'quarterlyresults');
             await extractUniqueFields(db, cashFlow, jobId, 'cashflow');
-
+            ///
 
 
             payload = {
@@ -293,14 +355,31 @@ async function getCompanyData(companyUrl, jobId, db, ih, Emitter, p) {
                 'mro': 'Retrieval for ' + basicQuotePrice.companyName + ' completed',
                 'progress': Math.floor(((p.tot - p.l.nbQueued()) / p.tot) * 100) + '%'
             });
+            return 1;
         }
     } catch (e) {
-        console.log('error occured while retreival ' + basicQuotePrice.companyName + e)
-        return 1;
+        throw e
+        return 0;
     }
 
 }
 
+
+async function getCompanyData(companyUrl, jobId, db, ih, Emitter, p){
+    
+    //return RcrawlFinPg(link, row_pos, x)
+console.log(ih);
+ let rcd= await retry(async ()=>await RgetCompanyData(companyUrl, jobId, db, ih, Emitter, p), {
+        retries: retryInstruction.retryLimit,
+        minTimeout:retryInstruction.retryTimeout,
+        maxTimeout:retryInstruction.retryTimeout,
+        factor:1,
+        onRetry:(ee)=>{console.log('retrydue to '  + ee)}
+      }).catch(e=>{return 0})
+
+    return rcd;
+    
+}
 
 async function extractUniqueFields(db, data, jobId, type) {
     data.standalone.forEach((e) => {
@@ -344,16 +423,20 @@ async function extractUniqueFields(db, data, jobId, type) {
 
 
 async function getCompanyList(type, filter) {
-    const x = new Xray();
+
     /*categories = await x('http://www.moneycontrol.com/india/stockpricequote/', {
         name: ['#mc_mainWrapper > div.PA10 > div.FL > div.PT15 > div.MT2.PA10.brdb4px.alph_pagn > a'],
         links: ['#mc_mainWrapper > div.PA10 > div.FL > div.PT15 > div.MT2.PA10.brdb4px.alph_pagn > a@href']
     });*/
 
-    let link = await x('http://www.moneycontrol.com/india/stockpricequote/C', {
+    return x('http://www.moneycontrol.com/india/stockpricequote/' + filter, {
         l: ['.pcq_tbl.MT10 a@href']
+    }).then((list) => {
+        return list.l
+    }).catch(e => {
+        console.log("cannot create job");
     })
-    return link.l;
+
 }
 
 
@@ -367,9 +450,14 @@ async function getCompanyList(type, filter) {
 [Event Emitter] - Event Emitter Instance
 */
 async function run(jD, db, Emitter) {
-
-    let limiter = new Bottleneck(jD.concurrentSU, null, null, null,false)
-        companyList = [];
+    x = new Xray();
+    retryInstruction ={
+        retryLimit : jD.retryInstruction.retryLimit,
+        retryTimeout:jD.retryInstruction.retryTimeout
+    }
+    console.log(retryInstruction)
+    let limiter = new Bottleneck(jD.concurrentSU, null, null, null, false)
+    companyList = [];
     var isTerminated = false;
 
     //create and setup required tables [jobid_fields,jobid_company_repo,jobid_company_data] for new job
@@ -379,9 +467,8 @@ async function run(jD, db, Emitter) {
 
 
     //get company list , store it into db table 
-    companyList = await getCompanyList();
-
-
+    // companyList = await getCompanyList(jD.scope, jD.filter);
+    companyList = await getCompanyList(jD.scope, jD.filter);
 
     //insert list of companies into company_repo table
     if (companyList != undefined || companyList != null) {
@@ -401,14 +488,14 @@ async function run(jD, db, Emitter) {
     }
 
     //schedule scraping or add tasks to bottleneck queue
-    for (var i = 0; i <= companyList.length; i++) {
+    for (var i = 550; i <= companyList.length; i++) {
         limiter.schedule(getCompanyData, companyList[i], jD.jobId, db, i, Emitter, {
             tot: companyList.length,
             l: limiter
         });
     }
 
-  
+
 
     Emitter.emit('jobProgress', {
         'jobId': jD.jobId,
