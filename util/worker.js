@@ -2,36 +2,15 @@ var Excel = require('exceljs');
 const database = require('./database.js');
 var db = database.sqliteSetup('scraper.sqlite3', '_master_');
 
+var numeral = require('numeral');
 
 var style = {
-    year: {
-        fill: {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: {
-                argb: 'c0c0c0'
-            },
-            bgColor: {
-                argb: 'c0c0c0'
-            }
-        },
-        font: {
-            name: 'Calibri',
-            bold: true,
-            size: 8
-        }
-    },
-    fieldName: {
-        fill: {
-            type: 'none'
-        },
-        font: {
-            name: 'Calibri',
-            bold: true,
-            size: 8
-        }
-
-    }
+    headerFontSize: 9,
+    headerColor: 'c0c0c0',
+    rowFontSize: 8,
+    emptyCellChar: '-',
+    firstColWidth: 40,
+    otherColWidth: 12
 }
 
 
@@ -44,13 +23,15 @@ function addHeaders(cat, type, field) {
     field[cat][type].year.forEach((year) => {
         fieldProp.push({
             header: 'Year',
-            key: year + '_year_' + cat + '_' + type
+            key: year + '_year_' + cat + '_' + type,
+            width: style.otherColWidth
         });
 
         field[cat][type].field.forEach((e) => {
             fieldProp.push({
                 header: e,
-                key: e + '_' + year + '_' + cat + '_' + type
+                key: e + '_' + year + '_' + cat + '_' + type,
+                width: style.otherColWidth
             });
         })
 
@@ -70,7 +51,7 @@ function prepareColumns(sheet, field) {
     fieldProp.push({
         header: 'Name',
         key: 'Name',
-        width: 40
+        width: style.firstColWidth
     })
     sectionMarker.push({
         id: 'Company',
@@ -78,7 +59,8 @@ function prepareColumns(sheet, field) {
     })
     fieldProp.push({
         header: 'Price',
-        key: 'bsePrice'
+        key: 'bsePrice',
+        width: style.otherColWidth
     })
     sectionMarker.push({
         id: 'BSE',
@@ -87,7 +69,8 @@ function prepareColumns(sheet, field) {
 
     fieldProp.push({
         header: 'Price',
-        key: 'nsePrice'
+        key: 'nsePrice',
+        width: style.otherColWidth
     })
     sectionMarker.push({
         id: 'NSE',
@@ -102,9 +85,11 @@ function prepareColumns(sheet, field) {
     field.quote.qfs.forEach((e) => {
         fieldProp.push({
             header: e,
-            key: e + '_qfs'
+            key: e + '_qfs',
+            width: style.otherColWidth
         })
     })
+
     sectionMarker.push({
         id: 'QUOTES (Consolidated)',
         location: fieldProp.length + 1
@@ -112,7 +97,8 @@ function prepareColumns(sheet, field) {
     field.quote.qfc.forEach((e) => {
         fieldProp.push({
             header: e,
-            key: e + '_qfc'
+            key: e + '_qfc',
+            width: style.otherColWidth
         })
 
     })
@@ -158,6 +144,9 @@ function prepareColumns(sheet, field) {
     })
     addHeaders('cashflow', 'consolidated', field);
 
+
+
+
     sheet.columns = fieldProp;
     sheet.getRow(1).hidden = true;
 
@@ -166,20 +155,24 @@ function prepareColumns(sheet, field) {
     sectionMarker.forEach((e) => {
         topHeaderRow[e.location] = e.id
     })
+
     sheet.addRow(topHeaderRow)
-    sheet.getRow(2).style = {
-        font: style.fieldName.font,
-        fill: {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: {
-                argb: 'c0c0c0'
-            },
-            bgColor: {
-                argb: 'c0c0c0'
-            }
+    sheet.getRow(2).font = {
+        name: 'Calibri',
+        size: style.headerFontSize,
+        bold: true
+    }
+    sheet.getRow(2).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: {
+            argb: style.headerColor
+        },
+        bgColor: {
+            argb: style.headerColor
         }
     }
+
 
 
     let bottomHeaderRow = [];
@@ -187,27 +180,33 @@ function prepareColumns(sheet, field) {
         bottomHeaderRow.push(e.header)
     })
     sheet.addRow(bottomHeaderRow)
+    sheet.getRow(3).font = {
+        name: 'Calibri',
+        size: style.headerFontSize,
+        bold: true
+    }
 
-    sheet.getRow(3).font = style.fieldName.font;
-    sheet.getRow(3).eachCell((c, n) => {
-        if (c.value == 'Year') {
-            c.fill = {
+    sheet.getRow(3).eachCell((e) => {
+        if (e.value == "Year") {
+            e.fill = {
                 type: 'pattern',
                 pattern: 'solid',
                 fgColor: {
-                    argb: 'c0c0c0'
+                    argb: style.headerColor
                 },
                 bgColor: {
-                    argb: 'c0c0c0'
+                    argb: style.headerColor
                 }
             }
         }
     })
 
-
     return fieldProp;
 
 }
+
+var workbook = new Excel.Workbook()
+var sheet = workbook.addWorksheet('Sheet');
 
 
 
@@ -223,8 +222,8 @@ function populateRowSection(data, cols, field, camelCat, cat, type) {
                     pg.data.forEach((e, index) => {
                             field[cat][type].field.forEach((k) => {
                                 if (e[k]) {
-                                    var val = e[k][yi];
-                                    ob[k + '_' + year + '_' + cat + '_' + type] = val;
+                                    var val = numeral(e[k][yi]);
+                                    ob[k + '_' + year + '_' + cat + '_' + type] = val.value() || 0;
                                 }
                             })
                         }
@@ -244,15 +243,15 @@ function fillRow(data, cols, sheet, field) {
     let d = JSON.parse(data.data)
     let ob = {};
     ob['Name'] = d.basic.companyName;
-    ob['bsePrice'] = d.basic.price.bse || 0;
-    ob['nsePrice'] = d.basic.price.nse || 0;
+    ob['bsePrice'] = numeral(d.basic.price.bse).value() || 0;
+    ob['nsePrice'] = numeral(d.basic.price.nse).value() || 0;
 
 
 
     d.quote.standalone.header.forEach((h, i) => {
         field.quote.qfs.forEach((k) => {
             if (h == k) {
-                ob[k + '_qfs'] = d.quote.standalone.value[i]
+                ob[k + '_qfs'] = numeral(d.quote.standalone.value[i]).value()
             }
         })
     })
@@ -260,7 +259,7 @@ function fillRow(data, cols, sheet, field) {
     d.quote.consolidated.header.forEach((h, i) => {
         field.quote.qfc.forEach((k) => {
             if (h == k) {
-                ob[k + '_qfc'] = d.quote.consolidated.value[i]
+                ob[k + '_qfc'] = numeral(d.quote.consolidated.value[i]).value()
             }
         })
     })
@@ -276,7 +275,8 @@ function fillRow(data, cols, sheet, field) {
     prscc = populateRowSection(d, cols, field, 'cashFlow', 'cashflow', 'consolidated')
 
 
-    ob = { ...ob,
+    ob = {
+        ...ob,
         ...prsbs,
         ...prsbc,
         ...prsps,
@@ -287,64 +287,69 @@ function fillRow(data, cols, sheet, field) {
         ...prscc
     }
 
+    //fill empty cells
     cols.forEach((c) => {
         if (!ob[c.key]) {
-            ob[c.key] = '-'
+            ob[c.key] = style.emptyCellChar
         }
     })
 
 
     let tempRow = sheet.addRow(ob)
-    tempRow.style = {
-        font: {
-            size: 8
-        },
-        alignment: {
-            horizontal: 'right'
-        }
+    tempRow.font = {
+        font: 'Calibri',
+        size: style.rowFontSize,
+        bold: false
     }
+    tempRow.alignment = {
+        horizontal: 'right'
+    }
+
     tempRow.eachCell((c, n) => {
 
         if (sheet.getColumn(n).header == 'Year') {
-            c.style = {
-                font: {
-                    font: 'Calibri',
-                    size: 8,
-                    bold: true
+            c.font = {
+                font: 'Calibri',
+                size: style.rowFontSize,
+                bold: true
+            }
+            c.alignment = {
+                horizontal: 'left'
+            }
+            c.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: {
+                    argb: style.headerColor
                 },
-                alignment: {
-                    horizontal: 'right'
-                },
-                fill: {
-                    type: 'pattern',
-                    pattern: 'solid',
-                    fgColor: {
-                        argb: 'c0c0c0'
-                    },
-                    bgColor: {
-                        argb: 'c0c0c0'
-                    }
+                bgColor: {
+                    argb: style.headerColor
                 }
             }
         }
         if (sheet.getColumn(n).header == 'Name') {
-            c.style = {
-                font: {
-                    font: 'Calibri',
-                    size: 8
-                },
-                alignment: {
-                    horizontal: 'left'
-                }
+            c.font = {
+                font: 'Calibri',
+                size: style.rowFontSize
+            }
+            c.alignment = {
+                horizontal: 'left'
             }
         }
-
     })
+
     tempRow.commit()
 }
 
 
 function excelexport(payload, db, jobId) {
+    //set global style
+    style.headerFontSize = payload.style.headerFontSize;
+    style.headerColor = payload.style.headerColor.toString().replace('#','')
+    style.rowFontSize = payload.style.rowFontSize;
+    style.emptyCellChar = payload.style.emptyCellChar;
+    style.firstColWidth = payload.style.firstColWidth;
+    style.otherColWidth = payload.style.otherColWidth;
 
     var options = {
         filename: './' + jobId + '.xlsx',
@@ -363,7 +368,7 @@ function excelexport(payload, db, jobId) {
 
     let cols = prepareColumns(sheet, payload)
 
-    let r = getCompanyData(jobId, db, 10000);
+    let r = getCompanyData(jobId, db, 5000);
 
     let last = 0;
     process.send({
