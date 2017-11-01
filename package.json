@@ -1,23 +1,27 @@
 {
-  "name": "xray",
+  "name": "scraper",
   "version": "1.0.0",
-  "description": "",
+  "description": "scraper server",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
+    "async-retry": "^1.1.4",
     "better-sqlite3": "^4.0.3",
     "bottleneck": "^1.16.0",
     "exceljs": "^0.6.2",
     "express": "^4.16.2",
+    "numeral": "^2.0.6",
     "request-promise": "^4.2.2",
+    "requestretry": "^1.12.2",
     "sizeof": "^1.0.0",
     "socket.io": "^2.0.3",
     "sqlite3": "^3.1.13",
     "typescript": "^2.5.3",
-    "x-ray": "git+https://github.com/matthewmueller/x-ray.git"
-  }
+    "x-ray": "git+https://github.com/krjj/x-ray.git"
+  },
+  "devDependencies": {}
 }
